@@ -1,35 +1,35 @@
-import 'dart:io' show Platform;
+/// Host platform detection (infrastructure layer).
+///
+/// Works on every target: `kIsWeb` selects web, and the native family comes
+/// from the conditional `host_environment` import, so this file never
+/// imports `dart:io`.
+library;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 
-enum PlatformKind { web, android, ios, macos, windows, linux, unknown }
+import 'package:flutter_umami_analytics/src/infrastructure/platform/host_environment.dart';
+import 'package:flutter_umami_analytics/src/infrastructure/platform/platform_kind.dart';
 
-extension PlatformKindLabel on PlatformKind {
-  String get wire => name;
-}
+export 'package:flutter_umami_analytics/src/infrastructure/platform/platform_kind.dart';
 
+/// Detects and caches the [PlatformKind] of the running host.
 class PlatformDetector {
   static PlatformKind? _cached;
 
+  /// Returns the host [PlatformKind]. Synchronous, cached after the first
+  /// call, never throws.
   static PlatformKind detect() {
     final cached = _cached;
     if (cached != null) return cached;
-
-    if (kIsWeb) return _cache(PlatformKind.web);
-
-    try {
-      if (Platform.isAndroid) return _cache(PlatformKind.android);
-      if (Platform.isIOS) return _cache(PlatformKind.ios);
-      if (Platform.isMacOS) return _cache(PlatformKind.macos);
-      if (Platform.isWindows) return _cache(PlatformKind.windows);
-      if (Platform.isLinux) return _cache(PlatformKind.linux);
-    } catch (_) {}
-
-    return _cache(PlatformKind.unknown);
+    return _cached = _resolve();
   }
 
-  static PlatformKind _cache(PlatformKind kind) {
-    _cached = kind;
-    return kind;
+  static PlatformKind _resolve() {
+    if (kIsWeb) return PlatformKind.web;
+    try {
+      return nativePlatformKind() ?? PlatformKind.unknown;
+    } catch (_) {
+      return PlatformKind.unknown;
+    }
   }
 }

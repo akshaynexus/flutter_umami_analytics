@@ -12,8 +12,11 @@ void main() async {
       endpoint: 'https://your-umami-instance.com',
       hostname: 'myapp.com',
       userId: 'user-123',
-      queueConfig: UmamiQueueConfig.inMemory(maxSize: 500),
+      // SQLite on Android / iOS / desktop, localStorage on web.
+      queueConfig: UmamiQueueConfig.persisted(maxSize: 500),
       logger: UmamiLogger(minLevel: UmamiLogLevel.debug),
+      // Adds platform, OS, app version and browser to trackEvent data.
+      attachDeviceData: true,
     ),
     recordFirstOpen: true,
   );

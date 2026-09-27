@@ -20,9 +20,10 @@ import 'package:flutter_umami_analytics/src/domain/ports/http_client_port.dart';
 import 'package:flutter_umami_analytics/src/domain/ports/queue_port.dart';
 import 'package:flutter_umami_analytics/src/infrastructure/api/umami_api_client.dart';
 import 'package:flutter_umami_analytics/src/infrastructure/collector/tracking_collector.dart';
-import 'package:flutter_umami_analytics/src/infrastructure/device/device_id_service.dart';
+import 'package:flutter_umami_analytics/src/infrastructure/device/device_id_factory.dart';
 import 'package:flutter_umami_analytics/src/infrastructure/device/device_info_service.dart';
 import 'package:flutter_umami_analytics/src/infrastructure/http/default_http_client.dart';
+import 'package:flutter_umami_analytics/src/infrastructure/platform/host_environment.dart';
 import 'package:flutter_umami_analytics/src/infrastructure/queue/queue_factory.dart';
 
 const _kFirstOpenEvent = 'first_open';
@@ -62,10 +63,16 @@ const _kFirstOpenUrl = '/app/launch';
 ///   [UmamiApiPort] for the management REST endpoints. Takes precedence over
 ///   [enableApi]; when set, [enableApi], [apiUsername] and [apiPassword] are
 ///   ignored and no login is attempted. Caller owns the lifecycle.
-/// - [deviceId] (optional): inject for testing; otherwise a
-///   [DefaultDeviceIdService] keyed by [FlutterUmamiConfig.instanceName].
+/// - [deviceId] (optional): inject for testing; otherwise the platform
+///   default keyed by [FlutterUmamiConfig.instanceName] (secure storage on
+///   native, `localStorage` on web).
 /// - [deviceInfo] (optional): inject for testing; otherwise a
 ///   [DefaultDeviceInfoService].
+/// - [collectDeviceDetails] (default `true`): when the default
+///   [DefaultDeviceInfoService] is used, await its `load()` (bounded by a
+///   2 s timeout) so the OS version, device model, app version and browser
+///   are known before the first event, and the native User-Agent carries
+///   the real OS version. Set `false` to skip the plugin calls.
 /// - [recordFirstOpen] (default `false`): when `true`, emits a one-shot
 ///   `first_open` event on the first launch (per [FlutterUmamiConfig.instanceName]).
 /// - [enableApi] (default `false`): when `true`, builds a [UmamiApiClient].
@@ -89,8 +96,20 @@ Future<FlutterUmamiAnalytics> createUmamiAnalytics(
   bool enableApi = false,
   String? apiUsername,
   String? apiPassword,
+  bool collectDeviceDetails = true,
 }) async {
   final logger = config.logger;
+
+  final DeviceInfoPort infoAdapter;
+  String? userAgent;
+  if (deviceInfo != null) {
+    infoAdapter = deviceInfo;
+  } else {
+    final service = DefaultDeviceInfoService(logger: logger);
+    if (collectDeviceDetails) await service.load();
+    userAgent = service.userAgent;
+    infoAdapter = service;
+  }
 
   final HttpClientPort httpAdapter;
   final bool ownsHttpAdapter;
@@ -102,6 +121,7 @@ Future<FlutterUmamiAnalytics> createUmamiAnalytics(
       client: httpClient,
       logger: logger,
       timeout: config.httpTimeout,
+      userAgent: userAgent,
     );
     ownsHttpAdapter = true;
   }
@@ -113,21 +133,24 @@ Future<FlutterUmamiAnalytics> createUmamiAnalytics(
     ownsQueueAdapter = false;
     logger.info('Using injected UmamiQueue; skipping built-in queue factory');
   } else {
-    queueAdapter =
-        createQueue(config.queueConfig, instanceName: config.instanceName);
+    queueAdapter = createQueue(
+      config.queueConfig,
+      instanceName: config.instanceName,
+      logger: logger,
+    );
     ownsQueueAdapter = true;
   }
 
   final policy = _policyFrom(config.queueConfig);
   final collector = TrackingCollector(
-    config: config,
+    config: _withBrowserReferrer(config),
     httpClient: httpAdapter,
     ownsHttpClient: ownsHttpAdapter,
     queue: queueAdapter,
     ownsQueue: ownsQueueAdapter,
     enqueueEnabled: policy.enqueueEnabled,
     flushPurgeTtl: policy.flushPurgeTtl,
-    deviceInfo: deviceInfo ?? DefaultDeviceInfoService(),
+    deviceInfo: infoAdapter,
   );
 
   final UmamiApiPort? resolvedApi;
@@ -146,8 +169,11 @@ Future<FlutterUmamiAnalytics> createUmamiAnalytics(
   }
 
   if (recordFirstOpen) {
-    final deviceIdService =
-        deviceId ?? DefaultDeviceIdService(instanceName: config.instanceName);
+    final deviceIdService = deviceId ??
+        createDefaultDeviceIdService(
+          instanceName: config.instanceName,
+          logger: logger,
+        );
     await _sendFirstOpen(collector, deviceIdService);
   }
 
@@ -188,6 +214,18 @@ Future<UmamiApiClient?> _initApiClient(
   }
 }
 
+/// On web, uses `document.referrer` as the one-shot first referrer when the
+/// caller did not set [FlutterUmamiConfig.firstReferrer] and the referrer is
+/// another site (same as the Umami web tracker). No-op on native.
+FlutterUmamiConfig _withBrowserReferrer(FlutterUmamiConfig config) {
+  if (config.firstReferrer != null) return config;
+  final referrer = readBrowserEnvironment()?.referrer ?? '';
+  if (referrer.isEmpty) return config;
+  final host = Uri.tryParse(referrer)?.host;
+  if (host == null || host.isEmpty || host == Uri.base.host) return config;
+  return config.copyWith(firstReferrer: referrer);
+}
+
 typedef _QueuePolicy = ({bool enqueueEnabled, Duration? flushPurgeTtl});
 
 /// Derives tracking-collector queue policy from the sealed
@@ -198,8 +236,10 @@ _QueuePolicy _policyFrom(UmamiQueueConfig config) {
   return switch (config) {
     DisabledUmamiQueueConfig() => (enqueueEnabled: false, flushPurgeTtl: null),
     InMemoryUmamiQueueConfig() => (enqueueEnabled: true, flushPurgeTtl: null),
-    PersistedUmamiQueueConfig(:final eventTtl) =>
-      (enqueueEnabled: true, flushPurgeTtl: eventTtl),
+    PersistedUmamiQueueConfig(:final eventTtl) => (
+        enqueueEnabled: true,
+        flushPurgeTtl: eventTtl
+      ),
   };
 }
 

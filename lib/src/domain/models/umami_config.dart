@@ -68,6 +68,14 @@ class FlutterUmamiConfig {
   /// Per-call `url` arguments always take precedence.
   final String defaultEventUrl;
 
+  /// When `true`, named events (`trackEvent`) carry the coarse device
+  /// details from [DeviceInfoData.toEventData] in their `data` map
+  /// (`platform`, `os`, `os_version`, `device_model`, `app_version`,
+  /// `app_build`, `browser`, `browser_version`). Keys the caller passes in
+  /// `data` win. Pageviews and `identify` are not changed. Defaults to
+  /// `false`. Not per-call overridable.
+  final bool attachDeviceData;
+
   /// Builds the runtime config. [websiteId], [endpoint], and [hostname] are
   /// required; the rest have defaults documented on each field.
   const FlutterUmamiConfig({
@@ -84,6 +92,7 @@ class FlutterUmamiConfig {
     this.httpTimeout = const Duration(seconds: 5),
     this.instanceName,
     this.defaultEventUrl = kDefaultEventUrl,
+    this.attachDeviceData = false,
   });
 
   /// Returns a new [FlutterUmamiConfig] with the supplied non-null fields
@@ -103,6 +112,7 @@ class FlutterUmamiConfig {
     Duration? httpTimeout,
     String? instanceName,
     String? defaultEventUrl,
+    bool? attachDeviceData,
   }) {
     return FlutterUmamiConfig(
       websiteId: websiteId ?? this.websiteId,
@@ -118,6 +128,7 @@ class FlutterUmamiConfig {
       httpTimeout: httpTimeout ?? this.httpTimeout,
       instanceName: instanceName ?? this.instanceName,
       defaultEventUrl: defaultEventUrl ?? this.defaultEventUrl,
+      attachDeviceData: attachDeviceData ?? this.attachDeviceData,
     );
   }
 
@@ -125,7 +136,7 @@ class FlutterUmamiConfig {
   /// returns a copy where only the supported keys (`websiteId`, `hostname`,
   /// `language`, `userId`) are overridden. Endpoint, [enabled], [queueConfig],
   /// [logger], [firstReferrer], [httpTimeout], [instanceName], [ipAddress],
-  /// and [defaultEventUrl] are not per-call overridable.
+  /// [defaultEventUrl], and [attachDeviceData] are not per-call overridable.
   FlutterUmamiConfig merge([UmamiConfigOverrides? overrides]) {
     if (overrides == null || overrides.isEmpty) return this;
     return FlutterUmamiConfig(
@@ -142,6 +153,7 @@ class FlutterUmamiConfig {
       instanceName: instanceName,
       ipAddress: ipAddress,
       defaultEventUrl: defaultEventUrl,
+      attachDeviceData: attachDeviceData,
     );
   }
 
@@ -181,7 +193,8 @@ class FlutterUmamiConfig {
           firstReferrer == other.firstReferrer &&
           httpTimeout == other.httpTimeout &&
           instanceName == other.instanceName &&
-          defaultEventUrl == other.defaultEventUrl;
+          defaultEventUrl == other.defaultEventUrl &&
+          attachDeviceData == other.attachDeviceData;
 
   /// Hash consistent with [operator==].
   @override
@@ -199,5 +212,6 @@ class FlutterUmamiConfig {
         httpTimeout,
         instanceName,
         defaultEventUrl,
+        attachDeviceData,
       );
 }

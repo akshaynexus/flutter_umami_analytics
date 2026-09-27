@@ -258,10 +258,20 @@ class TrackingCollector implements UmamiCollector {
       screen: screen ?? device.screenResolution,
       title: title,
       name: name,
-      data: data,
+      data: _eventData(config, device, name: name, data: data),
       id: config.userId ?? _sessionId,
       ipAddress: config.ipAddress,
     );
+  }
+
+  Map<String, dynamic>? _eventData(
+    FlutterUmamiConfig config,
+    DeviceInfoData device, {
+    required String? name,
+    required Map<String, dynamic>? data,
+  }) {
+    if (name == null || !config.attachDeviceData) return data;
+    return <String, dynamic>{...device.toEventData(), ...?data};
   }
 
   Future<bool> _send(Map<String, dynamic> body) async {

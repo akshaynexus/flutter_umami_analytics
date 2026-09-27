@@ -4,10 +4,12 @@ A comprehensive Flutter client for [Umami Analytics](https://umami.is). Track pa
 
 ## Features
 
-- **Page views & events** — `trackPageView`, `trackEvent`, `identify` with auto-captured device info (locale, screen, User-Agent per platform).
-- **Offline queue** — three strategies (`disabled`, `inMemory`, `persisted` SQLite with TTL); auto-flush on next successful send.
-- **Persistent device ID** — UUID v4 stored in `flutter_secure_storage`, namespaced per instance.
-- **`NavigatorObserver`** — auto-track route pushes/replaces/pops with `routeFilter` and `routeNameMapper` hooks.
+- **Page views & events** — `trackPageView`, `trackEvent`, `identify` with auto-captured device info (locale, logical screen size, User-Agent with the real OS version).
+- **Device details** — OS, OS version, device model, app version/build, browser and browser version (web), optionally attached to event data.
+- **Web support** — browser User-Agent, `localStorage` queue and device ID, browser URL route tracking.
+- **Offline queue** — three strategies (`disabled`, `inMemory`, `persisted`: SQLite on native, `localStorage` on web, with TTL); auto-flush on next successful send.
+- **Persistent device ID** — UUID v4 stored in `flutter_secure_storage` (native) or `localStorage` (web), namespaced per instance.
+- **`NavigatorObserver`** — auto-track route pushes/replaces/pops with `routeFilter` and `routeNameMapper` hooks; unnamed pages use the browser URL on web.
 - **Multi-instance** — isolated storage and queue per `instanceName`.
 - **REST API client** (opt-in) — login, websites, stats, pageviews, metrics, active visitors, events, sessions, teams, users.
 - **Per-call overrides** — `websiteId`, `hostname`, `language`, `userId` for a single call without mutating config.
@@ -17,7 +19,101 @@ A comprehensive Flutter client for [Umami Analytics](https://umami.is). Track pa
 
 ## Platforms
 
-Android, iOS, macOS, Windows, Linux. **Web is not supported** (relies on `sqflite` + `flutter_secure_storage`).
+Android, iOS, macOS, Windows, Linux and **Web**.
+
+| Concern            | Android / iOS / macOS / Windows / Linux                 | Web                                                          |
+| ------------------ | ------------------------------------------------------- | ------------------------------------------------------------ |
+| HTTP               | `package:http` `IOClient`                               | `package:http` `BrowserClient` (`fetch`, CORS)               |
+| User-Agent         | Browser-style UA with the real OS version               | The browser's own UA (the SDK never sets the header)         |
+| Persisted queue    | SQLite (`sqflite`)                                      | `localStorage` (one JSON key, bounded)                       |
+| Device ID          | `flutter_secure_storage`                                | `localStorage`                                               |
+| Locale / screen    | `PlatformDispatcher` (BCP-47, logical px)               | `navigator.language`, `screen.width x screen.height`         |
+| Device details     | `device_info_plus` + `package_info_plus`                | UA parsing + `package_info_plus` (`version.json`)            |
+
+## Web
+
+Web works with the same code as the other platforms:
+
+```dart
+final analytics = await createUmamiAnalytics(
+  const FlutterUmamiConfig(
+    websiteId: 'your-website-id',
+    endpoint: 'https://your-umami-instance.com',
+    hostname: 'myapp.example.com',
+    queueConfig: UmamiQueueConfig.persisted(), // localStorage on web
+  ),
+);
+```
+
+Notes:
+
+- **CORS.** The SDK posts to `/api/send` from the page origin. Umami answers
+  `/api/*` with `Access-Control-Allow-Origin: *` and allows any request
+  header, which is what the official Umami tracker script relies on. The SDK
+  sends only `Content-Type: application/json`, `Accept` and (after the first
+  response) `x-umami-cache`. It never sets `User-Agent` on web: browsers own
+  that header. A reverse proxy in front of Umami must keep those CORS
+  headers. The REST API client (`enableApi`) also needs CORS for
+  `Authorization`.
+- **Session token.** The `x-umami-cache` token is read from the response
+  header or, when a cross-origin response hides that header, from the JSON
+  body (`{"cache": "..."}`).
+- **Queue.** `UmamiQueueConfig.persisted()` stores events in `localStorage`
+  under `umami_queue[_instanceName]`. It survives reloads, keeps at most
+  `maxSize` events, drops the oldest half when the storage quota is full, and
+  falls back to memory in private mode or when site data is blocked.
+  `databasePath` is ignored. Tabs of the same origin share the queue.
+- **Device ID.** Stored in `localStorage` (`umami_device_id[_instanceName]`).
+  It is per browser profile and per origin, and it is deleted when the user
+  clears site data. A private window gets a new one.
+- **Routes.** `UmamiNavigatorObserver` tracks named routes as usual. On web,
+  a page route with no name (common with `Router` / `go_router` pages) is
+  tracked with the browser path after the next frame, for both the hash
+  (`/#/details`) and path (`/details`) URL strategies. Set
+  `useBrowserUrl: false` to turn this off, or use `routeNameMapper` for full
+  control.
+- **Referrer.** When `firstReferrer` is not set, the first pageview uses
+  `document.referrer` if it comes from another site.
+
+## Device information
+
+`createUmamiAnalytics` awaits `DefaultDeviceInfoService.load()` (at most 2 s,
+never throws; pass `collectDeviceDetails: false` to skip it). Fields per
+platform:
+
+| Field (`DeviceInfoData`) | Android              | iOS                         | macOS                 | Windows                     | Linux                  | Web                       |
+| ------------------------ | -------------------- | --------------------------- | --------------------- | --------------------------- | ---------------------- | ------------------------- |
+| `locale`                 | app locale (BCP-47)  | app locale                  | app locale            | app locale                  | app locale             | `navigator.language`      |
+| `screenResolution`       | logical px           | logical px                  | logical px            | logical px                  | logical px             | `screen.width x height`   |
+| `platform`               | `android`            | `ios`                       | `macos`               | `windows`                   | `linux`                | `web`                     |
+| `osName`                 | `Android`            | `iOS` / `iPadOS`            | `macOS`               | `Windows`                   | distro name            | parsed from UA            |
+| `osVersion`              | `version.release`    | `systemVersion`             | `major.minor.patch`   | `major.minor.build`         | `VERSION_ID`           | parsed from UA            |
+| `deviceModel`            | `model` (`Pixel 8`)  | `utsname.machine`           | `model`               | —                           | —                      | —                         |
+| `appVersion` / `appBuild`| `package_info_plus`  | `package_info_plus`         | `package_info_plus`   | `package_info_plus`         | `package_info_plus`    | `version.json`            |
+| `browserName` / `browserVersion` | —            | —                           | —                     | —                           | —                      | parsed from UA            |
+
+Umami receives `language` and `screen` in every payload and derives browser,
+OS and device type from the User-Agent header (the browser's own UA on web,
+a browser-style UA with the real OS version on native). The other details are
+not sent unless you opt in:
+
+```dart
+const FlutterUmamiConfig(
+  // ...
+  attachDeviceData: true, // adds platform, os, os_version, device_model,
+                          // app_version, app_build, browser, browser_version
+                          // to trackEvent data (your own keys win)
+);
+```
+
+### Privacy
+
+The SDK reads only coarse fields. It does **not** read advertising IDs,
+`identifierForVendor`, the Android ID, hardware serials, Linux machine ID,
+Windows computer or user name, the IP address or any location. The native
+User-Agent does not contain the device model. The device ID is a random
+UUID v4 that is used only for the `first_open` event and is never sent with
+events.
 
 ## Compatibility
 
@@ -111,6 +207,7 @@ await analytics.dispose();
 | `logger`        | `UmamiLogger`      | warning level   | Logger configuration                                     |
 | `firstReferrer` | `String?`          | `null`          | One-time referrer consumed by the first `trackPageView`  |
 | `httpTimeout`   | `Duration`         | 5s              | HTTP request timeout                                     |
+| `attachDeviceData` | `bool`          | `false`         | Merge device details into `trackEvent` data              |
 
 ### `createUmamiAnalytics` options
 
@@ -123,6 +220,7 @@ await analytics.dispose();
 | `enableApi`       | `bool`            | `false` | Enable REST API client (`analytics.apiClient`)                                                                       |
 | `apiUsername`     | `String?`         | `null`  | Auto-login on init when paired with `apiPassword` (**secret**, see [Credentials & Security](#credentials--security)) |
 | `apiPassword`     | `String?`         | `null`  | Password for auto-login (**secret**, see [Credentials & Security](#credentials--security))                           |
+| `collectDeviceDetails` | `bool`       | `true`  | Await OS / app / browser details before the first event (2 s timeout)                                                 |
 
 ## Exposed instance members
 
@@ -142,7 +240,7 @@ UmamiQueueConfig.disabled()
 // In-memory queue (default, lost on restart)
 UmamiQueueConfig.inMemory(maxSize: 500)
 
-// SQLite-persisted queue (survives app restart)
+// Persisted queue (survives app restart): SQLite on native, localStorage on web
 UmamiQueueConfig.persisted(maxSize: 500, eventTtl: Duration(hours: 48))
 
 // Custom SQLite location (default: getDatabasesPath())
@@ -155,7 +253,7 @@ UmamiQueueConfig.persisted(
 
 Events that fail to send are enqueued automatically and flushed on the next successful send (auto-flush). Call `analytics.flush()` to force a flush manually (e.g. on `AppLifecycleState.paused`). `dispose()` always performs a final flush.
 
-`PersistedUmamiQueueConfig` evicts the oldest event when full and prunes entries older than `eventTtl` on every flush. The DB file is `umami_queue_{instanceName}.db` (or `umami_queue.db` when no `instanceName`).
+`PersistedUmamiQueueConfig` evicts the oldest event when full and prunes entries older than `eventTtl` on every flush. The DB file is `umami_queue_{instanceName}.db` (or `umami_queue.db` when no `instanceName`). On web the queue lives in the `localStorage` key `umami_queue[_{instanceName}]` (see [Web](#web)).
 
 ## Logger
 
@@ -347,3 +445,4 @@ Built on the work of:
 - [`flutter_umami`](https://pub.dev/packages/flutter_umami) — collector interface
 - [`flutter_estatisticas`](https://pub.dev/packages/flutter_estatisticas) — REST API coverage
 - [`@umami/node`](https://github.com/umami-software/node) — identify/session API
+- [`umami_flutter_sdk`](https://pub.dev/packages/umami_flutter_sdk) (MIT) — device-info collection ideas (real OS version in the User-Agent, app version, logical screen size); see [NOTICE](NOTICE)

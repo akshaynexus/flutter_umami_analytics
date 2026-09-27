@@ -2,7 +2,7 @@
 
 ## Persistent device ID
 
-`DefaultDeviceIdService` generates a UUID v4 per installation on the first call to `getId()` and persists it with `flutter_secure_storage` (Keychain on iOS/macOS, EncryptedSharedPreferences on Android).
+`DefaultDeviceIdService` generates a UUID v4 per installation on the first call to `getId()` and persists it with `flutter_secure_storage` (Keychain on iOS/macOS, EncryptedSharedPreferences on Android). On web the ID is stored in `localStorage` instead (see [Web storage](#web-storage)).
 
 - iOS/macOS: survives reinstalls (Keychain persists).
 - Android: lost on reinstall or when app data is cleared.
@@ -44,17 +44,26 @@ Inject it via `deviceId` in [`createUmamiAnalytics()`](1-initialization.md) **to
 
 ## Device information
 
-`DefaultDeviceInfoService.gather()` produces an immutable [`DeviceInfoData`] snapshot that `TrackingCollector` reads when building each payload:
+`DefaultDeviceInfoService` produces an immutable [`DeviceInfoData`] snapshot that `TrackingCollector` reads when building each payload.
 
-| Field              | Source                                                                | Sent to Umami    | Example                   |
-| ------------------ | --------------------------------------------------------------------- | ---------------- | ------------------------- |
-| `screenResolution` | `WidgetsBinding.instance.platformDispatcher.views.first.physicalSize` | yes (`screen`)   | `1920x1080` (physical px) |
-| `locale`           | `WidgetsBinding.instance.platformDispatcher.locale.toString()`        | yes (`language`) | `en_US`                   |
-| `platform`         | `PlatformDetector.detect()` (`dart:io` Platform / `kIsWeb`)           | no               | `ios`/`android`/`web`     |
+- `gather()` is synchronous. It returns the locale, the screen size, the platform and every detail that `load()` has read so far.
+- `load()` reads the OS, device-model, app and browser details once. It is bounded by a 2 s timeout and never throws: fields that could not be read stay `null`. `createUmamiAnalytics()` awaits it unless you pass `collectDeviceDetails: false`.
 
-> `platform` is collected but **is not part of the payload**; `UserAgentService` uses it internally to choose the User-Agent.
+| Field                            | Native source                                                             | Web source                          | Sent to Umami                     |
+| -------------------------------- | ------------------------------------------------------------------------- | ----------------------------------- | --------------------------------- |
+| `locale`                         | `PlatformDispatcher.locale.toLanguageTag()` (`en-US`)                     | `navigator.language`                | yes (`language`)                  |
+| `screenResolution`               | first display size / device pixel ratio (logical px)                      | `screen.width x screen.height`      | yes (`screen`)                    |
+| `platform`                       | `PlatformDetector` (`android`, `ios`, `macos`, `windows`, `linux`)        | `web`                               | only with `attachDeviceData`      |
+| `osName` / `osVersion`           | `device_info_plus` (`version.release`, `systemVersion`, ...)              | parsed from `navigator.userAgent`   | only with `attachDeviceData`      |
+| `deviceModel`                    | `device_info_plus` (`model`, `utsname.machine`); not on Windows / Linux   | —                                   | only with `attachDeviceData`      |
+| `appVersion` / `appBuild`        | `package_info_plus`                                                       | `package_info_plus` (`version.json`) | only with `attachDeviceData`      |
+| `browserName` / `browserVersion` | —                                                                         | parsed from `navigator.userAgent`   | only with `attachDeviceData`      |
 
-The result is cached in memory after the first call; invoking `gather()` again does not query `WidgetsBinding` again. If `platformDispatcher` is not available (e.g. outside the Flutter zone), `screenResolution` and `locale` fall back to `"unknown"`.
+With `FlutterUmamiConfig(attachDeviceData: true)`, `trackEvent` merges `DeviceInfoData.toEventData()` into the event `data` (keys `platform`, `os`, `os_version`, `device_model`, `app_version`, `app_build`, `browser`, `browser_version`). Keys you pass in `data` win. Pageviews and `identify` are not changed.
+
+Privacy: the service never reads advertising IDs, `identifierForVendor`, the Android ID, serials, the Linux machine ID, the Windows computer or user name, the IP address or the location.
+
+If the Flutter binding is not available yet (e.g. outside the Flutter zone), `screenResolution` and `locale` fall back to `"unknown"` and the snapshot is not cached, so a later call can read the real values.
 
 Inject your own implementation by passing `deviceInfo` to [`createUmamiAnalytics()`](1-initialization.md):
 
@@ -63,25 +72,22 @@ class CustomDeviceInfo implements DeviceInfoPort {
   @override
   DeviceInfoData gather() => const DeviceInfoData(
     locale: 'es-ES',
-    screenResolution: '1080x1920',
+    screenResolution: '390x844',
     platform: 'android',
+    appVersion: '2.1.0',
   );
 }
 ```
 
 ## User-Agent
 
-`DefaultHttpClient` sets a realistic per-platform User-Agent via `UserAgentService.defaultUserAgent`:
+Umami derives the Browser, OS and Device panels from the `User-Agent` request header.
 
-| Platform      | Emulated User-Agent                                           |
-| ------------- | ------------------------------------------------------------- |
-| Android       | Chrome 120 Mobile (injects `Platform.operatingSystemVersion`) |
-| iOS           | Safari 17 Mobile                                              |
-| macOS         | Safari 17 Desktop                                             |
-| Windows       | Chrome 120 Desktop                                            |
-| Linux         | Chrome 120 Desktop                                            |
-| Web / unknown | `Mozilla/5.0 (compatible; FlutterUmami/1.0)`                  |
+- **Native:** `DefaultHttpClient` sends a browser-style UA from `UserAgentService.build()`. After `load()`, it carries the real OS version (for example `Android 14; K`, `iPhone OS 17_4`, `iPad; CPU OS 17_4`, `Mac OS X 14_5_0`). It never contains the device model. Windows always reports `Windows NT 10.0`, like real browsers. Before `load()` (or with `collectDeviceDetails: false`) a generic OS version is used.
+- **Web:** the browser sends its own UA. Browsers do not allow a page to set this header, so the SDK never adds it (`buildBaseHeaders(includeUserAgent: false)`).
 
-The value is selected once (cached in `UserAgentService._cached`) and reused for the lifetime of the process.
+To use a different User-Agent on native, inject your own `HttpClientPort` via `httpClientPort` in [`createUmamiAnalytics()`](1-initialization.md). See [10-advanced.md](10-advanced.md).
 
-To use a different User-Agent, inject your own `http.Client` via the `httpClient` parameter of [`createUmamiAnalytics()`](1-initialization.md) and set the `User-Agent` header on every `POST` request (the internal adapter always adds its own, so your client must override it). See [10-advanced.md](10-advanced.md).
+## Web storage
+
+On web, the default device ID service stores the ID in `localStorage` (`umami_device_id[_instanceName]`, `umami_first_launch[_instanceName]`). The ID is per browser profile and per origin; it is deleted when the user clears site data, and a private window gets a new one. If `localStorage` is blocked, the ID lives in memory for the current page load.

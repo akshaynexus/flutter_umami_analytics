@@ -23,7 +23,7 @@ Compact guide for OpenCode sessions. Every line answers: "Would an agent miss th
 
 Flutter package (`flutter_umami_analytics` v1.0.0) — Dart/Flutter client for Umami Analytics. Tracks pageviews, events, and sessions; offline queue (disabled/inMemory/persisted SQLite), NavigatorObserver, persistent device ID (secure storage), optional REST API client. SDK `^3.4.0`, Flutter `>=3.22.0`.
 
-Platforms: android, ios, macos, windows, linux (no web).
+Platforms: android, ios, macos, windows, linux, web. Web-only code (`package:web`) and native-only code (`dart:io`, `sqflite`) sit behind conditional exports (`infrastructure/platform/host_environment.dart`, `infrastructure/queue/persisted_queue_builder.dart`); never import them directly. Run `flutter test --platform chrome` too (`test/web/` is browser-only).
 
 ## Architecture — Hexagonal (ports & adapters)
 

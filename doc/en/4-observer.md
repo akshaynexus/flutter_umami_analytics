@@ -56,6 +56,10 @@ Each hook applies `autoTrack` first, then `routeFilter`, then `routeNameMapper` 
   - `title = route.settings.name` (the original route name), useful to keep readability in the Umami dashboard even when you customize the URL.
   - If the mapper returns `null`, the route **is not tracked**.
 
+### Web: browser URL fallback
+
+On Flutter web (`useBrowserUrl` defaults to `kIsWeb`), a `PageRoute` without `settings.name` and without a `routeNameMapper` is tracked with the browser location, read after the next frame. Both URL strategies work: `https://host/#/details` and `https://host/details` report `/details` (the query string is kept). Dialogs and other non-page routes are not tracked this way. Pass `useBrowserUrl: false` to disable it.
+
 ### Fire-and-forget
 
 Tracking is fire-and-forget: network errors do not propagate to the caller.

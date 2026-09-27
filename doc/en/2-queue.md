@@ -39,6 +39,10 @@ The database file is named `umami_queue.db` or `umami_queue_{instanceName}.db` w
 
 Internally it uses table `queued_events` (columns `id INTEGER PRIMARY KEY AUTOINCREMENT`, `payload TEXT NOT NULL`, `created_at INTEGER NOT NULL`) with index `idx_created_at`. Insertion runs inside a transaction that, upon reaching `maxSize`, atomically evicts the oldest events (`count - maxSize + 1` rows) before inserting the new one, preserving the limit.
 
+### Web
+
+On Flutter web, `UmamiQueueConfig.persisted()` uses `localStorage` instead of SQLite: one JSON value under `umami_queue[_instanceName]`, bounded by `maxSize`, pruned by `eventTtl` on flush. When the storage quota is full, the oldest half is dropped. When `localStorage` is blocked (private mode, blocked site data), the queue falls back to memory. `databasePath` is ignored. Tabs of the same origin share the queue.
+
 ## `UmamiQueue` Port
 
 Contract implemented by the three adapters:

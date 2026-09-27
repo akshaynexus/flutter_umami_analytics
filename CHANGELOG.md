@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.3.0-dev.1
+
+Not published to pub.dev.
+
+- Feat: **web support**. `web` is listed in `platforms`. No library in the web import graph uses `dart:io` or `sqflite`:
+  - `host_environment.dart` selects an io, web (`package:web`) or stub implementation with conditional exports.
+  - `UmamiQueueConfig.persisted()` uses a bounded `localStorage` queue on web (`KeyValueQueue`): survives reloads, never reuses ids, trims the oldest half on quota errors, falls back to memory in private mode.
+  - The device ID uses `localStorage` on web and `flutter_secure_storage` on native.
+  - `DefaultHttpClient` no longer imports `dart:io`; on web `http.Client()` is a `BrowserClient`. No `User-Agent` header is set on web (browsers own it). The `x-umami-cache` token is also read from the JSON response body, because cross-origin responses hide the header.
+  - `UmamiNavigatorObserver` tracks unnamed page routes with the browser URL on web (hash and path strategies). New `useBrowserUrl` and `currentUri` parameters.
+  - On web, the first pageview uses `document.referrer` when `firstReferrer` is not set and the referrer is another site.
+- Feat: **device details**, ported from the ideas in `umami_flutter_sdk` 0.4.1 (MIT, see `NOTICE`). `DeviceInfoData` gains optional `osName`, `osVersion`, `deviceModel`, `appVersion`, `appBuild`, `browserName`, `browserVersion`, plus `copyWith` and `toEventData()`. `DefaultDeviceInfoService.load()` reads them with `device_info_plus` / `package_info_plus` (native) or from the browser UA (web), bounded by 2 s.
+- Feat: `FlutterUmamiConfig.attachDeviceData` (default `false`) merges the device details into `trackEvent` data.
+- Feat: `createUmamiAnalytics(collectDeviceDetails: true)` awaits the details before the first event; the native User-Agent then carries the real OS version (never the device model).
+- Fix: `locale` is now BCP-47 (`en-US`, was `en_US`) and `screenResolution` is in logical pixels (was physical pixels), which is what Umami uses for its language and device-type panels.
+- Fix: the Android User-Agent no longer embeds the kernel string from `Platform.operatingSystemVersion`.
+- Change: `DefaultHttpClient` logs timeouts as `Timeout` warnings instead of `Request` errors.
+- Deps: `web`, `device_info_plus` (`>=11.3.0 <14.0.0`), `package_info_plus` (`>=8.1.0 <11.0.0`). The Flutter `>=3.22.0` floor is unchanged.
+- Example: web platform folder; persisted queue and `attachDeviceData` enabled.
+
 ## 1.2.0
 
 - Feat: `FlutterUmamiConfig.defaultEventUrl` lets you define the URL assigned to `trackEvent` calls that omit the `url` argument at init time. Defaults to the new public constant `kDefaultEventUrl` (`/event`), preserving backwards compatibility with existing Umami dashboards. An explicit per-call `url` always takes precedence. `TrackingCollector` now reads the default from config instead of a hardcoded `/event` constant. The field is part of `copyWith`, value equality, and `hashCode`; it is not per-call overridable via `UmamiConfigOverrides` (same policy as `endpoint` and `httpTimeout`).

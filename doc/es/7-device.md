@@ -85,3 +85,13 @@ class CustomDeviceInfo implements DeviceInfoPort {
 El valor se selecciona una sola vez (cacheado en `UserAgentService._cached`) y se reutiliza durante toda la vida del proceso.
 
 Para usar un User-Agent distinto, inyecta tu propio `http.Client` con el parámetro `httpClient` de [`createUmamiAnalytics()`](1-initialization.md) e impón la cabecera `User-Agent` en cada petición `POST` (el adapter interno siempre añade la suya, por lo que tu cliente debe sobrescribirla). Ver [10-advanced.md](10-advanced.md).
+
+## Web y detalles del dispositivo (1.3.0)
+
+- En web, el ID de dispositivo se guarda en `localStorage` (`umami_device_id[_instanceName]`). Es por perfil de navegador y por origen, y se borra al limpiar los datos del sitio.
+- En web, el navegador envía su propio User-Agent; el SDK nunca define esa cabecera.
+- `DefaultDeviceInfoService.load()` lee `osName`, `osVersion`, `deviceModel`, `appVersion`, `appBuild`, `browserName` y `browserVersion` (`device_info_plus`, `package_info_plus`, o el User-Agent del navegador en web). En nativo, el User-Agent incluye la versión real del sistema operativo.
+- `locale` usa BCP-47 (`en-US`) y `screenResolution` usa píxeles lógicos.
+- Con `FlutterUmamiConfig(attachDeviceData: true)`, `trackEvent` añade estos campos a `data`.
+
+Detalles completos en la versión inglesa: [doc/en/7-device.md](../en/7-device.md).

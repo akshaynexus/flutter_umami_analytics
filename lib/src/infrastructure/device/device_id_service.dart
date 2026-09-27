@@ -1,3 +1,10 @@
+/// Device id stored with `flutter_secure_storage` (infrastructure layer).
+///
+/// The default [DeviceIdPort] on native targets. Flutter web uses
+/// `KeyValueDeviceIdService` over `localStorage` instead (see
+/// `createDefaultDeviceIdService`).
+library;
+
 import 'dart:async' show Completer;
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -7,6 +14,7 @@ import 'package:flutter_umami_analytics/src/domain/ports/device_id_port.dart';
 import 'package:flutter_umami_analytics/src/domain/utils/instance_suffix.dart';
 import 'package:flutter_umami_analytics/src/domain/utils/safe_async.dart';
 
+/// [DeviceIdPort] that keeps a random UUID v4 in secure storage.
 class DefaultDeviceIdService implements DeviceIdPort {
   static const _uuid = Uuid();
   static const _kDeviceIdKey = 'umami_device_id';

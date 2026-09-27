@@ -5,14 +5,20 @@
 /// [UmamiCollector.trackPageView]. The observer never throws; tracking
 /// failures are routed to [logger] when provided.
 ///
+/// On Flutter web, a page route without a name is tracked with the
+/// browser's current path (path or hash URL strategy), so apps that use
+/// `Router` / `go_router` pages without names still report pageviews.
+///
 /// Layer: infrastructure (observer adapter).
 library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_umami_analytics/src/domain/logger/umami_logger.dart';
 import 'package:flutter_umami_analytics/src/domain/ports/collector_port.dart';
+import 'package:flutter_umami_analytics/src/infrastructure/observer/browser_route_url.dart';
 
 /// [NavigatorObserver] that auto-emits pageviews on push / replace / pop.
 ///
@@ -45,18 +51,34 @@ class UmamiNavigatorObserver extends NavigatorObserver {
   /// When `null`, tracking errors are silently dropped.
   final UmamiLogger? logger;
 
+  /// When `true`, a [PageRoute] with no `settings.name` (and no
+  /// [routeNameMapper]) is tracked with the browser's current location,
+  /// read after the next frame so the router has updated the URL.
+  ///
+  /// Defaults to `true` on Flutter web and `false` elsewhere. Dialogs and
+  /// other non-page routes are never tracked this way.
+  final bool useBrowserUrl;
+
+  final Uri Function() _currentUri;
+
   /// Builds an observer wired to a [collector].
   ///
   /// Required: [collector] (the [UmamiCollector] that receives pageviews).
   /// Optional: [autoTrack] (defaults to `true`), [routeFilter],
-  /// [routeNameMapper], and [logger].
+  /// [routeNameMapper], [logger], [useBrowserUrl] (defaults to `kIsWeb`)
+  /// and [currentUri] (reads the browser location; defaults to
+  /// [Uri.base], which is `window.location` on web).
   UmamiNavigatorObserver({
     required UmamiCollector collector,
     this.autoTrack = true,
     this.routeFilter,
     this.routeNameMapper,
     this.logger,
-  }) : _collector = collector;
+    bool? useBrowserUrl,
+    Uri Function()? currentUri,
+  })  : _collector = collector,
+        useBrowserUrl = useBrowserUrl ?? kIsWeb,
+        _currentUri = currentUri ?? (() => Uri.base);
 
   /// Tracks a pageview for the just-pushed [route] (after filter / mapper).
   @override
@@ -89,11 +111,33 @@ class UmamiNavigatorObserver extends NavigatorObserver {
 
     final mapper = routeNameMapper;
     final url = mapper != null ? mapper(route) : route.settings.name;
-    if (url == null) return;
+    if (url == null) {
+      if (mapper == null && useBrowserUrl && route is PageRoute) {
+        _trackBrowserUrlAfterFrame();
+      }
+      return;
+    }
 
     final title = mapper != null ? route.settings.name : null;
 
     unawaited(_runTrack(url: url, title: title));
+  }
+
+  void _trackBrowserUrlAfterFrame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // The router reports the new URL to the browser in a post-frame
+      // callback too; a zero timer runs after it.
+      Timer.run(() {
+        final String url;
+        try {
+          url = routeUrlFromBrowserUri(_currentUri());
+        } catch (e) {
+          logger?.warning('UmamiNavigatorObserver: browser URL unreadable: $e');
+          return;
+        }
+        unawaited(_runTrack(url: url));
+      });
+    });
   }
 
   Future<void> _runTrack({required String url, String? title}) async {
